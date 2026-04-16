@@ -1,0 +1,83 @@
+# ==============================================
+# 全局通用忽略
+# ==============================================
+# 系统文件
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+# IDE/编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-*
+
+# ==============================================
+# 前端忽略
+# ==============================================
+# 依赖
+web/node_modules/
+web/.pnpm-store/
+
+# 构建产物
+web/dist/
+web/build/
+web/.vite/
+
+# 环境变量
+web/.env
+web/.env.local
+web/.env.development.local
+web/.env.production.local
+
+# 测试/缓存
+web/coverage/
+web/.nyc_output/
+
+# ==============================================
+# 后端 (server/) 忽略
+# ==============================================
+# 依赖
+server/node_modules/
+server/.pnpm-store/
+
+# 构建产物
+server/dist/
+server/build/
+
+# 环境变量
+server/.env
+server/.env.local
+
+# 上传文件目录（Multer生成，绝对不要提交）
+server/uploads/
+
+# SQLite数据库文件（本地开发用，不要提交到仓库）
+server/data.db
+server/*.db
+server/*.db-wal
+server/*.db-shm
+
+# 日志
+server/logs/
+server/*.log
+
+# ==============================================
+# 共享目录 (shared/) 忽略
+# ==============================================
+shared/node_modules/
+shared/dist/
+
+# ==============================================
+# 其他项目相关
+# ==============================================
+# 本地调试配置
+.local/
+.env*
+
+# 临时文件
+*.tmp
+*.temp

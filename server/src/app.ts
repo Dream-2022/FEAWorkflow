@@ -1,13 +1,27 @@
 import express from "express";
-const cors = require("cors");
+import cors from "cors";
+import { env } from "./config/env";
+import { requestLogger } from "./middleware/requestLogger";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import healthRouter from "./routes/health";
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+app.use(
+  cors({
+    origin: env.CORS_ORIGIN,
+    credentials: true,
+  }),
+);
 
-app.get("/api/health", (req, res) => {
-  res.send("server ok");
-});
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.use(requestLogger);
+
+app.use("/api/health", healthRouter);
+
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 export default app;

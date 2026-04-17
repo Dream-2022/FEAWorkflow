@@ -1,110 +1,98 @@
 # Frontend Agent Workflow 系统架构设计
 
-## 1. 文档概述
+## 1. 文档目标
 
-本文档从工程实现角度，详细阐述 Frontend Agent Workflow 平台的系统分层、模块职责、核心数据流与完整执行链路，为后续代码开发提供架构级指导。
-
-### 1.1 设计原则
-
-1. **分层清晰**：各层职责单一，边界明确，便于独立演进
-2. **可观测**：每个节点的输入、输出、状态、耗时可追溯
-3. **可替换**：模型、检索、存储等核心模块支持平滑替换
-4. **工程导向**：所有设计围绕前端工程任务场景，避免过度泛化
+本文档定义 Frontend Agent Workflow 平台的架构蓝图，为后续代码开发提供可直接执行的工程依据。面向读者为开发工程师，重点说明「怎么做」，不重复 PRD 中已定义的产品需求。
 
 ---
 
-## 2. 系统分层架构
+## 2. 系统目标
 
-系统采用**五层垂直分层架构**，从上到下依次为：
+### 2.1 技术目标
+
+将「上传项目文件 → 任务规划 → 上下文检索 → 工程分析 → 方案生成 → 结果自检 → 结构化输出」形成完整闭环，每个节点的输入、输出、状态、耗时可追溯、可复用。
+
+### 2.2 架构约束
+
+| 约束项 | 要求 |
+|--------|------|
+| 链路完整性 | MVP 阶段必须打通文件上传到结果展示的完整链路 |
+| 可解释性 | 每个 Agent 节点必须有独立输入输出，支持落库和前端展示 |
+| 模块可替换 | 模型调用层、检索层、存储层均需定义清晰接口，支持后续平滑替换 |
+| 轻量优先 | 不引入重型框架，自研工作流编排器，SQLite 存储 |
+
+---
+
+## 3. 系统分层
+
+采用五层垂直分层，自上而下为调用依赖关系：
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    前端展示层 (Presentation Layer)            │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │ FilePanel│  │TaskInput │  │ Workflow │  │  Result  │  │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                      接口层 (API Layer)                       │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │  Files   │  │  Tasks   │  │ Workflow  │  │ Retrieval │  │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                   工作流编排层 (Orchestration Layer)          │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │              Workflow Orchestrator                     │  │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │  │
-│  │  │ Planner │ │Retriever│ │Analyzer │ │Generator│   │  │
-│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘   │  │
-│  │                    ┌─────────┐                         │  │
-│  │                    │Reviewer │                         │  │
-│  │                    └─────────┘                         │  │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                  RAG 与上下文层 (Context Layer)               │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │  Parser  │  │ Chunker  │  │ Indexer  │  │ Searcher │  │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                      存储层 (Storage Layer)                    │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │  files   │  │  chunks  │  │  tasks   │  │ workflow  │  │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
-│  ┌──────────┐                                              │  │
-│  │  results │                                              │  │
-│  └──────────┘                                              │  │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│                  前端展示层                          │
+│  React + Zustand + Tailwind                        │
+│  三栏工作台：FilePanel / WorkflowPanel / ResultPanel │
+└────────────────────────────┬───────────────────────┘
+                             │ HTTP
+┌────────────────────────────▼───────────────────────┐
+│                    接口层                            │
+│  Express Routes + Controller + 统一响应封装          │
+│  POST /files/upload  GET /tasks/:id/workflow  等    │
+└────────────────────────────┬───────────────────────┘
+                             │ 调用
+┌────────────────────────────▼───────────────────────┐
+│               工作流编排层                            │
+│  Workflow Orchestrator → 5 个 Agent 节点顺序执行     │
+│  Planner → Retriever → Analyzer → Generator → Reviewer│
+└────────────────────────────┬───────────────────────┘
+                             │ 调用
+┌────────────────────────────▼───────────────────────┐
+│               RAG 与上下文层                          │
+│  Parser → Chunker → Indexer → Searcher              │
+└────────────────────────────┬───────────────────────┘
+                             │ 读写
+┌────────────────────────────▼───────────────────────┐
+│                    存储层                            │
+│  SQLite: files / chunks / tasks / workflow_nodes /    │
+│         task_results                                 │
+└────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. 各层职责详解
+## 4. 模块职责与边界
 
-### 3.1 前端展示层
+### 4.1 前端展示层
 
-**职责**：用户交互入口与结果可视化
+**职责**：用户交互、状态展示、数据驱动 UI 更新。
 
-| 模块             | 职责                               | 关键数据结构       |
-| ---------------- | ---------------------------------- | ------------------ |
-| FilePanel        | 文件上传、文件列表、解析状态展示   | File[]             |
-| TaskInputPanel   | 任务文本输入、执行按钮             | TaskContent        |
-| WorkflowPanel    | Agent 节点状态、执行进度、耗时展示 | WorkflowNode[]     |
-| ResultPanel      | 结构化结果卡片展示                 | TaskResult         |
-| HistoryPanel     | 历史任务列表与切换                 | TaskSummary[]      |
-| NodeDetailDrawer | 节点输入/输出详情抽屉              | WorkflowNodeDetail |
+按职责拆分为三个独立 Zustand Store，边界清晰：
 
-**状态管理**：Zustand 按职责拆分三个 Store
+```
+useFileStore     → 文件列表、上传进度、解析状态
+useTaskStore     → 任务内容、工作流节点状态、最终结果
+useUIStore       → 选中节点、展开抽屉、侧栏折叠等 UI 状态
+```
 
-- `useFileStore`：文件列表、上传状态
-- `useTaskStore`：当前任务、工作流节点、最终结果
-- `useUIStore`：UI 状态（选中节点、标签页等）
+前端组件不直接调用后端 Agent 或 RAG 模块，仅通过 HTTP 接口获取数据。所有状态变更通过 Store 驱动 UI 重渲染。
 
----
+### 4.2 接口层（Server Routes）
 
-### 3.2 接口层
+**职责**：接收 HTTP 请求、参数校验、调用 Service 层、返回统一格式响应。
 
-**职责**：HTTP 接口定义、参数校验、统一响应封装
+```
+POST /files/upload      → 接收文件，触发解析与切片
+GET  /files             → 返回文件列表
+DELETE /files/:id       → 删除文件及关联 chunks
+POST /tasks             → 创建任务，触发工作流，返回 taskId
+GET  /tasks             → 返回历史任务列表
+GET  /tasks/:id         → 返回任务详情与状态
+GET  /tasks/:id/workflow → 返回节点执行记录
+GET  /tasks/:id/result  → 返回最终结构化结果
+POST /retrieval/search  → 调试用，测试检索结果
+```
 
-| 接口           | 方法   | 路径                  | 输入                | 输出               |
-| -------------- | ------ | --------------------- | ------------------- | ------------------ |
-| 上传文件       | POST   | `/files/upload`       | multipart/form-data | UploadResponse     |
-| 获取文件列表   | GET    | `/files`              | -                   | File[]             |
-| 删除文件       | DELETE | `/files/:id`          | -                   | SuccessResponse    |
-| 创建任务       | POST   | `/tasks`              | TaskCreateRequest   | TaskCreateResponse |
-| 获取任务列表   | GET    | `/tasks`              | -                   | TaskSummary[]      |
-| 获取任务详情   | GET    | `/tasks/:id`          | -                   | TaskDetail         |
-| 获取工作流节点 | GET    | `/tasks/:id/workflow` | -                   | WorkflowNode[]     |
-| 获取最终结果   | GET    | `/tasks/:id/result`   | -                   | TaskResult         |
-| 调试检索       | POST   | `/retrieval/search`   | SearchQuery         | RetrievalItem[]    |
-
-**统一响应格式**：
+所有接口返回统一包装：
 
 ```typescript
 interface ApiResponse<T> {
@@ -114,717 +102,399 @@ interface ApiResponse<T> {
 }
 ```
 
----
+### 4.3 工作流编排层
 
-### 3.3 工作流编排层
+**职责**：控制 Agent 节点执行顺序，管理任务生命周期，写入节点状态。
 
-**职责**：Agent 节点调度、状态流转、错误处理、数据落库
+核心由 `orchestrator.ts` 和 `nodeRunner.ts` 两个文件组成：
 
-#### 3.3.1 Workflow Orchestrator
+- **orchestrator.ts**：任务入口函数 `runWorkflow(taskId, taskContent)`，负责上下文初始化、节点顺序调用、最终结果落库。
+- **nodeRunner.ts**：通用节点执行函数 `runNode(nodeName, agent)`，每个节点复用同一套流程：写入 running → 调用 Agent → 记录 input_json / output_json / duration_ms → 写入 success / error。
 
-核心编排器，负责完整任务生命周期管理：
+**节点执行顺序固定**：
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    runWorkflow()                          │
-│  1. createInitialContext()                                │
-│  2. updateTaskStatus(running)                             │
-│  3. ┌─────────────────────────────────────────────────┐ │
-│     │           runNode('planner')                    │ │
-│     │  - write running status                         │ │
-│     │  - invoke agent                                  │ │
-│     │  - record input/output/duration                 │ │
-│     │  - write success/error status                   │ │
-│     └─────────────────────────────────────────────────┘ │
-│  4. ┌─────────────────────────────────────────────────┐ │
-│     │           runNode('retriever')                  │ │
-│     └─────────────────────────────────────────────────┘ │
-│  5. ┌─────────────────────────────────────────────────┐ │
-│     │           runNode('analyzer')                   │ │
-│     └─────────────────────────────────────────────────┘ │
-│  6. ┌─────────────────────────────────────────────────┐ │
-│     │           runNode('generator')                  │ │
-│     └─────────────────────────────────────────────────┘ │
-│  7. ┌─────────────────────────────────────────────────┐ │
-│     │           runNode('reviewer')                   │ │
-│     └─────────────────────────────────────────────────┘ │
-│  8. saveFinalResult()                                    │
-│  9. updateTaskStatus(done)                               │
-└─────────────────────────────────────────────────────────┘
+planner → retriever → analyzer → generator → reviewer
 ```
 
-#### 3.3.2 Agent 统一规范
+不允许节点间并行，不允许跳过节点。后续扩展可在 nodeRunner 中增加条件判断。
 
-每个 Agent 遵循统一输入输出契约：
+### 4.4 Agent 层
 
-```typescript
-interface WorkflowContext {
-  taskId: string;
-  taskContent: string;
-  uploadedFiles: FileEntity[];
-  plannerOutput?: PlannerOutput;
-  retrievalOutput?: RetrievalOutput;
-  analyzerOutput?: AnalyzerOutput;
-  generatorOutput?: GeneratorOutput;
-}
+**职责**：每个 Agent 负责单一业务环节，输入输出均为 TypeScript 类型定义的结构化对象。
 
-interface AgentResult<T> {
-  success: boolean;
-  data: T;
-  summary: string;
-  warnings?: string[];
-}
+| Agent     | 入口文件                | 核心输入              | 核心输出                                          |
+|-----------|------------------------|-----------------------|---------------------------------------------------|
+| Planner   | `agents/plannerAgent.ts`  | taskContent           | taskType / subtasks / searchKeywords / targetModules |
+| Retriever | `agents/retrieverAgent.ts` | taskContent + plannerOutput | relatedFiles / relatedChunks / retrievalSummary |
+| Analyzer  | `agents/analyzerAgent.ts`  | taskContent + retrievalOutput | currentImplementation / impactScope / risks |
+| Generator | `agents/generatorAgent.ts`  | taskContent + analyzerOutput | changeSuggestions / implementationSteps / docDraft |
+| Reviewer  | `agents/reviewerAgent.ts`   | generatorOutput + retrievalOutput | inconsistencies / missingPoints / finalPolishedResult |
 
-interface Agent<TInput, TOutput> {
-  (context: WorkflowContext): Promise<AgentResult<TOutput>>;
-}
+每个 Agent 调用 `LLMClient.chat()`，通过各自独立的 `promptBuilder.ts` 构建 Prompt。Agent 禁止直接读写数据库，所有数据通过 orchestrator 传递。
+
+### 4.5 RAG 与上下文层
+
+**职责**：将上传文件转换为可检索的 Chunk，为 Retriever Agent 提供上下文数据。
+
+Pipeline 顺序：`Parser` → `Chunker` → `Indexer` → `Searcher`
+
+- **Parser**（`rag/parser.ts`）：按文件类型分发解析逻辑，Markdown 按标题层级提取，代码文件读取全文。
+- **Chunker**（`rag/chunker.ts`）：Markdown 按 `#` 标题切分（300~1200 字符/块），代码按函数/组件级符号切分（保底文件级），每个 Chunk 记录来源路径和符号名。
+- **Indexer**（`rag/indexer.ts`）：将 Chunk 写入 SQLite chunks 表。
+- **Searcher**（`rag/searcher.ts`）：接收关键词，返回打分排序后的 Top N Chunk。评分规则：文件名命中+5、symbolName+4、标题+3、内容命中按次数+1、路径含模块名+2。
+
+### 4.6 存储层
+
+**职责**：所有持久化操作经 Repository 层完成，业务代码不直接操作数据库。
+
+```
+storage/
+  db.ts                  → 数据库连接初始化，建表语句
+  repositories/
+    fileRepo.ts          → files 表 CRUD
+    chunkRepo.ts         → chunks 表 CRUD，关键词搜索
+    taskRepo.ts          → tasks 表 CRUD
+    workflowRepo.ts      → workflow_nodes 表 CRUD
+    resultRepo.ts        → task_results 表 CRUD
 ```
 
-#### 3.3.3 各 Agent 职责
-
-| Agent     | 输入                              | 输出                                                             | 核心职责                |
-| --------- | --------------------------------- | ---------------------------------------------------------------- | ----------------------- |
-| Planner   | taskContent                       | { taskType, subtasks, searchKeywords, targetModules }            | 任务拆解与检索方向规划  |
-| Retriever | taskContent + plannerOutput       | { relatedFiles, relatedChunks, retrievalSummary }                | 从 RAG 中检索相关上下文 |
-| Analyzer  | taskContent + retrievalOutput     | { currentImplementation, impactScope, dependencies, risks }      | 工程分析与影响评估      |
-| Generator | taskContent + analyzerOutput      | { changeSuggestions, implementationSteps, readmeDraft, prDraft } | 方案生成与文档草稿      |
-| Reviewer  | generatorOutput + retrievalOutput | { inconsistencies, missingPoints, finalPolishedResult }          | 自检审核与结果校准      |
+Repository 层只做数据存取，不含业务逻辑。
 
 ---
 
-### 3.4 RAG 与上下文层
+## 5. 核心数据流
 
-**职责**：文件解析、内容切片、索引构建、相关检索
-
-#### 3.4.1 Parser
-
-解析不同类型文件内容：
-
-| 文件类型      | 解析方式                | 输出                                       |
-| ------------- | ----------------------- | ------------------------------------------ |
-| Markdown      | 按标题层级解析          | { titlePath: string[], content: string }[] |
-| JS/TS/JSX/TSX | 读取全文 + 简单符号识别 | { content: string, symbols: string[] }     |
-| Vue           | 读取 template + script  | { template: string, script: string }       |
-
-#### 3.4.2 Chunker
-
-将解析结果切分为可检索的 Chunk：
-
-**Markdown 切片规则**：
-
-- 按 `#` / `##` / `###` 切分
-- 每个 Chunk 控制在 300~1200 字符
-- 保留标题路径
-
-**代码切片规则**：
-
-- 优先按函数/组件切分（`export function`, `const Xxx = () =>`, `function Xxx()` 等）
-- 保底按文件切分
-- 每个 Chunk 记录 symbolName
-
-#### 3.4.3 Indexer
-
-将 Chunk 写入索引（SQLite chunks 表）
-
-#### 3.4.4 Searcher
-
-根据查询检索相关 Chunk，采用**关键词打分策略**：
-
-| 匹配项                   | 分值  |
-| ------------------------ | ----- |
-| 文件名完全匹配           | +5    |
-| symbolName 匹配          | +4    |
-| 标题匹配                 | +3    |
-| 内容关键词命中（按次数） | +1/次 |
-| 路径包含关键模块名       | +2    |
-
-按总分倒序取 Top N 返回。
-
----
-
-### 3.5 存储层
-
-**职责**：数据持久化，使用 SQLite 本地存储
-
-#### 3.5.1 数据表设计
-
-**files 表**：存储上传文件元信息
-
-```sql
-CREATE TABLE files (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  path TEXT NOT NULL,
-  ext TEXT,
-  mime_type TEXT,
-  size INTEGER,
-  content TEXT,
-  parse_status TEXT NOT NULL DEFAULT 'pending',
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-**chunks 表**：存储切片索引
-
-```sql
-CREATE TABLE chunks (
-  id TEXT PRIMARY KEY,
-  file_id TEXT NOT NULL,
-  file_path TEXT NOT NULL,
-  chunk_type TEXT NOT NULL,
-  title TEXT,
-  symbol_name TEXT,
-  language TEXT,
-  content TEXT NOT NULL,
-  summary TEXT,
-  keywords TEXT,
-  order_index INTEGER,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (file_id) REFERENCES files(id)
-);
-```
-
-**tasks 表**：存储任务记录
-
-```sql
-CREATE TABLE tasks (
-  id TEXT PRIMARY KEY,
-  content TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'queued',
-  started_at DATETIME,
-  finished_at DATETIME,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-**workflow_nodes 表**：存储工作流节点执行记录
-
-```sql
-CREATE TABLE workflow_nodes (
-  id TEXT PRIMARY KEY,
-  task_id TEXT NOT NULL,
-  node_name TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
-  input_json TEXT,
-  output_json TEXT,
-  started_at DATETIME,
-  finished_at DATETIME,
-  duration_ms INTEGER,
-  error_message TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (task_id) REFERENCES tasks(id)
-);
-```
-
-**task_results 表**：存储最终结构化结果
-
-```sql
-CREATE TABLE task_results (
-  id TEXT PRIMARY KEY,
-  task_id TEXT NOT NULL UNIQUE,
-  related_files_json TEXT,
-  analysis_json TEXT,
-  suggestions_json TEXT,
-  risks_json TEXT,
-  doc_draft TEXT,
-  next_steps_json TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (task_id) REFERENCES tasks(id)
-);
-```
-
----
-
-## 4. 核心数据流
-
-### 4.1 文件上传数据流
+### 5.1 文件上传与索引
 
 ```
-用户选择文件
-    ↓
-前端 FormData 上传
-    ↓
-POST /files/upload
-    ↓
-Multer 接收文件 → 保存到 /uploads 目录
-    ↓
-识别文件类型 → 读取文本内容
-    ↓
-写入 files 表（parse_status = 'parsing'）
-    ↓
-触发 Parser → 触发 Chunker
-    ↓
-写入 chunks 表
-    ↓
+前端: 选择文件 → FormData POST /files/upload
+  ↓
+后端: Multer 接收 → 保存至 uploads/ 目录
+  ↓
+识别文件类型（ext / mime_type）
+  ↓
+读取文本内容（txt / md / ts / js 等）
+  ↓
+fileRepo.insert()  → 写入 files 表，parse_status = 'parsing'
+  ↓
+Parser.parse() → Chunker.chunk() → Indexer.index()
+  ↓
 更新 files.parse_status = 'success' / 'failed'
-    ↓
-返回上传结果给前端
-    ↓
-前端刷新文件列表
+  ↓
+返回上传结果，前端刷新文件列表
 ```
 
-### 4.2 任务执行数据流
+### 5.2 任务执行与轮询
 
 ```
-用户输入任务 → 点击执行
-    ↓
-前端 POST /tasks
-    ↓
-后端创建 tasks 记录（status = 'queued'）
-    ↓
-返回 taskId 给前端
-    ↓
-前端启动轮询：GET /tasks/:id, /workflow, /result
-    ↓
-后端启动 Workflow Orchestrator
-    ↓
-┌─────────────────────────────────────────┐
-│  执行 Planner Node                      │
-│  - 记录 input_json                      │
-│  - 调用 LLM                             │
-│  - 记录 output_json + duration          │
-│  - 更新 node status = 'success'         │
-└─────────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────────┐
-│  执行 Retriever Node                    │
-│  - 调用 Searcher 检索                   │
-│  - 记录检索结果                         │
-└─────────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────────┐
-│  执行 Analyzer Node                     │
-│  - 基于检索结果做工程分析               │
-└─────────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────────┐
-│  执行 Generator Node                    │
-│  - 生成方案与文档草稿                   │
-└─────────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────────┐
-│  执行 Reviewer Node                     │
-│  - 自检与结果校准                       │
-└─────────────────────────────────────────┘
-    ↓
-写入 task_results 表
-    ↓
-更新 tasks.status = 'done'
-    ↓
-前端轮询获取到最终结果 → 展示
+前端: 输入任务文本 → POST /tasks { content }
+  ↓
+taskRepo.create() → tasks 表写入，status = 'queued'，返回 taskId
+  ↓
+前端记录 taskId，启动定时轮询（每 2s）：
+    GET /tasks/:id           → status
+    GET /tasks/:id/workflow  → nodes[]
+    GET /tasks/:id/result    → 最终结果（若已生成）
+  ↓
+后端同步启动 runWorkflow()：
+  ↓
+taskRepo.updateStatus('running')
+  ↓
+nodeRunner('planner')    → plannerAgent.run() → workflowRepo.insertNode() → workflowRepo.updateNode()
+  ↓
+nodeRunner('retriever')  → retrieverAgent.run()
+  ↓
+nodeRunner('analyzer')  → analyzerAgent.run()
+  ↓
+nodeRunner('generator') → generatorAgent.run()
+  ↓
+nodeRunner('reviewer')  → reviewerAgent.run()
+  ↓
+resultRepo.save(reviewOutput.finalPolishedResult)
+  ↓
+taskRepo.updateStatus('done')
+  ↓
+前端轮询获取到 result → 停止轮询 → 渲染 ResultPanel
 ```
 
-### 4.3 历史任务查看数据流
+### 5.3 历史任务回填
 
 ```
-用户点击历史任务
-    ↓
-前端 GET /tasks/:id
-    ↓
-前端 GET /tasks/:id/workflow
-    ↓
-前端 GET /tasks/:id/result
-    ↓
-回填 useTaskStore
-    ↓
-更新页面展示
+前端: 点击历史任务
+  ↓
+GET /tasks/:id → 获取任务基本信息与状态
+GET /tasks/:id/workflow → 获取全部节点记录
+GET /tasks/:id/result  → 获取最终结果
+  ↓
+useTaskStore.setCurrentTask(taskId)
+useTaskStore.setWorkflowNodes(nodes)
+useTaskStore.setFinalResult(result)
+  ↓
+UI 更新，展示节点状态与结果
 ```
 
 ---
 
-## 5. 一次完整任务执行链路详解
+## 6. 完整任务执行链路
 
-以「**为 Switch 组件新增 loading 与 disabled 联动能力**」为例，展示完整执行链路。
+以「为 Switch 组件新增 loading 与 disabled 联动能力」为例。
 
-### 5.1 前置条件
+**前置**：用户已上传 `Switch/index.tsx`、`Switch/README.md`、`Button/index.tsx`，chunks 表已有对应切片记录。
 
-用户已上传：
-
-- `src/components/Switch/index.tsx`
-- `src/components/Switch/README.md`
-- `src/components/Button/index.tsx`（参考组件）
-
-### 5.2 链路步骤
-
-#### Step 1：用户发起任务
-
-**输入**：
+### Step 1：创建任务
 
 ```
-任务内容：为 Switch 组件新增 loading 与 disabled 联动能力，分析涉及文件并生成改动建议与 README 更新说明。
+前端 POST /tasks { content: "为 Switch 组件新增 loading 与 disabled 联动能力..." }
+后端: taskRepo.create() → 返回 { taskId: "t_001", status: "queued" }
+前端: 记录 taskId，显示任务卡片，启动轮询
 ```
 
-**后端动作**：
+### Step 2：Planner Agent
 
-- 创建 task 记录，status = 'queued'
-- 返回 taskId 给前端
-- 启动 Orchestrator
+```
+输入 context = { taskId: "t_001", taskContent: "..." }
+调用 LLM，PromptBuilder.buildPlannerPrompt(taskContent)
+LLM 输出 JSON（taskType: "component_enhancement", searchKeywords: ["Switch", "loading", "disabled", "Button"], ...）
+落库: workflow_nodes { node_name: "planner", status: "success", input_json, output_json, duration_ms }
+更新 context.plannerOutput
+```
+
+### Step 3：Retriever Agent
+
+```
+输入 context = { ..., plannerOutput: { searchKeywords: [...], targetModules: [...] } }
+调用 Searcher.search({ keywords: ["Switch", "loading", "disabled", "Button"], topN: 10 })
+Searcher 查询 chunks 表，按打分排序返回检索结果
+落库: workflow_nodes { node_name: "retriever", status: "success", output_json }
+更新 context.retrievalOutput
+```
+
+### Step 4：Analyzer Agent
+
+```
+输入 context = { ..., retrievalOutput: { relatedFiles: [...], relatedChunks: [...] } }
+调用 LLM，PromptBuilder.buildAnalyzerPrompt(taskContent, retrievalOutput)
+LLM 分析当前实现、影响范围、依赖、风险
+落库: workflow_nodes { node_name: "analyzer", status: "success", output_json }
+更新 context.analyzerOutput
+```
+
+### Step 5：Generator Agent
+
+```
+输入 context = { ..., analyzerOutput: { currentImplementation, impactScope, risks } }
+调用 LLM，PromptBuilder.buildGeneratorPrompt(taskContent, analyzerOutput)
+LLM 生成改动建议、实现步骤、README 草稿、PR 描述
+落库: workflow_nodes { node_name: "generator", status: "success", output_json }
+更新 context.generatorOutput
+```
+
+### Step 6：Reviewer Agent
+
+```
+输入 context = { ..., generatorOutput, retrievalOutput }
+调用 LLM，PromptBuilder.buildReviewerPrompt(generatorOutput, retrievalOutput)
+LLM 检查不一致项、遗漏点，输出 finalPolishedResult
+落库: workflow_nodes { node_name: "reviewer", status: "success", output_json }
+```
+
+### Step 7：保存结果
+
+```
+resultRepo.save({
+  taskId: "t_001",
+  relatedFilesJson: analyzerOutput.impactScope,
+  analysisJson: analyzerOutput.currentImplementation,
+  suggestionsJson: generatorOutput.changeSuggestions,
+  risksJson: analyzerOutput.risks,
+  docDraft: generatorOutput.readmeDraft,
+  nextStepsJson: generatorOutput.implementationSteps
+})
+taskRepo.updateStatus('done')
+```
+
+### Step 8：前端展示
+
+前端停止轮询，渲染 5 个结果卡片：涉及文件 / 当前实现 / 改动建议 / 风险点 / README 草稿。
 
 ---
 
-#### Step 2：Planner Agent 执行
+## 7. 关键设计原则
 
-**输入**：
+### 7.1 节点间数据传递规范
 
-```typescript
-{
-  taskContent: "为 Switch 组件新增 loading 与 disabled 联动能力...";
-}
-```
+所有 Agent 输出均为 TypeScript 类型定义的结构化对象，禁止返回纯字符串或无 Schema 的 JSON。好处：
 
-**LLM Prompt**（示例）：
+1. 落库字段明确，前端展示可直接映射字段
+2. Reviewer 可针对具体字段做一致性检查
+3. 后续替换模型或改写 Prompt 不影响数据流
 
-```
-你是一个前端工程任务规划师。请分析以下任务，输出结构化执行计划。
+### 7.2 错误处理策略
 
-任务：{{taskContent}}
+节点级别错误不影响已执行节点结果：
 
-请按 JSON 格式输出：
-{
-  "taskType": "component_enhancement",
-  "subtasks": [
-    "查找 Switch 组件当前实现",
-    "分析 loading 与 disabled 状态联动逻辑",
-    "参考其他组件（如 Button）的实现",
-    "生成改动方案",
-    "更新 README 文档"
-  ],
-  "searchKeywords": ["Switch", "loading", "disabled", "Button", "component"],
-  "targetModules": ["src/components/Switch", "src/components/Button"],
-  "expectedOutputSections": ["relatedFiles", "analysis", "suggestions", "risks", "docDraft"]
-}
-```
+- 单个节点 `runNode()` 抛出异常 → 标记该节点 `status = 'error'` → 标记任务 `status = 'error'` → 返回错误信息
+- 前端展示已成功节点（可查看）和失败节点（显示 errorMessage）
+- chunks 表支持删除文件时级联清理（`ON DELETE CASCADE`）
 
-**输出**：
+### 7.3 LLM 调用约束
 
-```typescript
-{
-  taskType: "component_enhancement",
-  subtasks: [...],
-  searchKeywords: ["Switch", "loading", "disabled", "Button"],
-  targetModules: ["src/components/Switch"],
-  expectedOutputSections: [...]
-}
-```
+- 所有 Agent 经由统一 `LLMClient` 封装，不直接使用 OpenAI SDK 或其他模型 SDK
+- Prompt 按 Agent 独立维护（`agents/prompts/planner.ts` 等），便于调优
+- LLM 输出统一要求 JSON 格式，后端做 `JSON.parse()` 解析；解析失败时降级记录 `rawText`，不影响主流程
 
-**落库**：workflow_nodes 表记录 planner 节点的 input_json、output_json、duration_ms
+### 7.4 检索保底策略
+
+若 RAG 检索结果为空：
+
+- Retriever 返回空列表，并附加 `warnings: ["上下文不足"]`
+- Analyzer / Generator 在 Prompt 中附带此警告，输出时明确说明「基于任务文本，未找到高相关上下文」
+- Reviewer 检查 Generator 输出是否有明显幻觉，要求 Generator 保守输出
 
 ---
 
-#### Step 3：Retriever Agent 执行
+## 8. 目录结构映射
 
-**输入**：
-
-```typescript
-{
-  taskContent: "...",
-  plannerOutput: {
-    searchKeywords: ["Switch", "loading", "disabled", "Button"],
-    targetModules: ["src/components/Switch"]
-  }
-}
-```
-
-**检索过程**：
-
-1. 从 plannerOutput 提取关键词
-2. 查询 chunks 表，按打分规则排序
-3. 取 Top 10 相关 Chunk
-
-**检索结果示例**：
-| chunkId | filePath | chunkType | content 摘要 | score |
-|---------|----------|-----------|--------------|-------|
-| c1 | Switch/index.tsx | code | const Switch = ({ disabled, ... }) => { ... } | 9 |
-| c2 | Switch/README.md | doc | ## Props - disabled: boolean | 7 |
-| c3 | Button/index.tsx | code | const Button = ({ loading, disabled, ... }) => { ... } | 6 |
-
-**输出**：
-
-```typescript
-{
-  relatedFiles: [
-    "src/components/Switch/index.tsx",
-    "src/components/Switch/README.md",
-    "src/components/Button/index.tsx"
-  ],
-  relatedChunks: [
-    { chunkId: "c1", filePath: "...", content: "...", score: 9 },
-    ...
-  ],
-  retrievalSummary: "找到 Switch 组件实现、文档，以及 Button 组件参考实现"
-}
-```
-
-**落库**：workflow_nodes 表记录 retriever 节点
-
----
-
-#### Step 4：Analyzer Agent 执行
-
-**输入**：
-
-```typescript
-{
-  taskContent: "...",
-  retrievalOutput: { relatedFiles, relatedChunks, ... }
-}
-```
-
-**LLM 分析**：基于检索到的代码片段，分析：
-
-- 当前 Switch 组件已有 disabled prop，但无 loading
-- Button 组件已有 loading 与 disabled 联动逻辑（loading=true 时自动 disabled）
-- 影响范围：Switch 组件自身、可能的测试文件
-
-**输出**：
-
-```typescript
-{
-  currentImplementation: "Switch 组件当前支持 disabled prop，通过 CSS 控制样式，但未实现 loading 状态",
-  impactScope: ["src/components/Switch/index.tsx", "src/components/Switch/README.md"],
-  dependencies: [],
-  risks: [
-    "需确保 loading 状态不破坏现有 disabled 逻辑",
-    "需考虑样式兼容性"
-  ]
-}
-```
-
-**落库**：workflow_nodes 表记录 analyzer 节点
-
----
-
-#### Step 5：Generator Agent 执行
-
-**输入**：
-
-```typescript
-{
-  taskContent: "...",
-  analyzerOutput: { currentImplementation, impactScope, ... }
-}
-```
-
-**LLM 生成**：
-
-- 改动建议：新增 loading prop，loading=true 时自动设置 disabled
-- 实现步骤：修改 Props 类型 → 添加状态逻辑 → 更新样式 → 更新文档
-- README 草稿：新增 loading prop 说明
-
-**输出**：
-
-```typescript
-{
-  changeSuggestions: [
-    "新增 loading?: boolean prop",
-    "loading 为 true 时强制 disabled 为 true",
-    "添加 loading 状态样式"
-  ],
-  implementationSteps: [...],
-  readmeDraft: "## Props\n- loading?: boolean - 是否显示加载状态...",
-  prDraft: "feat: Switch 组件新增 loading 与 disabled 联动能力..."
-}
-```
-
-**落库**：workflow_nodes 表记录 generator 节点
-
----
-
-#### Step 6：Reviewer Agent 执行
-
-**输入**：
-
-```typescript
-{
-  generatorOutput: { ... },
-  retrievalOutput: { ... }
-}
-```
-
-**LLM 自检**：
-
-- 检查生成内容是否与检索上下文一致
-- 检查是否有遗漏（如测试文件未提及）
-- 做保守修正
-
-**输出**：
-
-```typescript
-{
-  inconsistencies: [],
-  missingPoints: [
-    "建议补充测试文件改动说明"
-  ],
-  finalPolishedResult: {
-    // 整合后的最终结果
-  }
-}
-```
-
-**落库**：workflow_nodes 表记录 reviewer 节点
-
----
-
-#### Step 7：保存最终结果
-
-将 finalPolishedResult 写入 task_results 表，更新 tasks.status = 'done'
-
----
-
-#### Step 8：前端展示
-
-前端轮询获取到最终结果，在 ResultPanel 展示：
-
-- 涉及文件列表卡片
-- 当前实现分析卡片
-- 推荐改动方案卡片
-- 风险点卡片
-- README 草稿卡片（支持复制）
-
----
-
-## 6. 目录结构映射
-
-### 6.1 后端目录结构
+### 8.1 后端
 
 ```
-server/
-├── src/
-│   ├── app.ts                          # Express 入口
-│   ├── routes/                         # 接口层
-│   │   ├── files.ts
-│   │   ├── tasks.ts
-│   │   └── retrieval.ts
-│   ├── controllers/                    # Controller 层
-│   │   ├── fileController.ts
-│   │   ├── taskController.ts
-│   │   └── retrievalController.ts
-│   ├── services/                       # Service 层
-│   │   ├── fileService.ts
-│   │   ├── taskService.ts
-│   │   └── resultService.ts
-│   ├── workflow/                       # 工作流编排层
-│   │   ├── orchestrator.ts
-│   │   ├── types.ts
-│   │   └── nodeRunner.ts
-│   ├── agents/                         # Agent 层
-│   │   ├── plannerAgent.ts
-│   │   ├── retrieverAgent.ts
-│   │   ├── analyzerAgent.ts
-│   │   ├── generatorAgent.ts
-│   │   └── reviewerAgent.ts
-│   ├── rag/                            # RAG 与上下文层
-│   │   ├── parser.ts
-│   │   ├── chunker.ts
-│   │   ├── indexer.ts
-│   │   ├── searcher.ts
-│   │   └── types.ts
-│   ├── models/                         # LLM 适配层
-│   │   ├── llmClient.ts
-│   │   ├── promptBuilder.ts
-│   │   └── schemas.ts
-│   ├── storage/                        # 存储层
-│   │   ├── db.ts
-│   │   └── repositories/
-│   │       ├── fileRepo.ts
-│   │       ├── chunkRepo.ts
-│   │       ├── taskRepo.ts
-│   │       ├── workflowRepo.ts
-│   │       └── resultRepo.ts
-│   ├── utils/
-│   │   ├── logger.ts
-│   │   ├── fileType.ts
-│   │   └── time.ts
-│   └── constants/
-│       └── workflow.ts
-├── uploads/                            # 上传文件存储目录
-└── data/
-    └── db.sqlite                       # SQLite 数据库文件
+server/src/
+├── app.ts                              # Express 入口，中间件配置
+├── routes/                             # 接口层：路由定义
+│   ├── files.ts
+│   ├── tasks.ts
+│   └── retrieval.ts
+├── controllers/                       # 接口层：参数校验，调用 service
+│   ├── fileController.ts
+│   ├── taskController.ts
+│   └── retrievalController.ts
+├── services/                          # 业务逻辑组织层
+│   ├── fileService.ts                 # 文件上传 + 解析 + 切片编排
+│   ├── taskService.ts                 # 任务创建 + 触发工作流
+│   └── resultService.ts               # 结果查询与格式化
+├── workflow/                          # 工作流编排层
+│   ├── orchestrator.ts                 # runWorkflow() 任务入口
+│   ├── nodeRunner.ts                  # runNode() 节点执行器
+│   └── types.ts                       # WorkflowContext / AgentResult 等类型
+├── agents/                            # Agent 层：每个 Agent 独立文件
+│   ├── plannerAgent.ts
+│   ├── retrieverAgent.ts
+│   ├── analyzerAgent.ts
+│   ├── generatorAgent.ts
+│   ├── reviewerAgent.ts
+│   └── prompts/                       # Prompt 模板按 Agent 拆分
+│       ├── planner.ts
+│       ├── analyzer.ts
+│       ├── generator.ts
+│       └── reviewer.ts
+├── rag/                               # RAG 与上下文层
+│   ├── parser.ts                      # 按文件类型分发解析
+│   ├── chunker.ts                     # 切片逻辑
+│   ├── indexer.ts                     # 写入 chunks 表
+│   ├── searcher.ts                    # 关键词检索 + 打分
+│   └── types.ts                       # RetrievalItem / Chunk 等类型
+├── models/                            # LLM 适配层
+│   ├── llmClient.ts                   # 统一 chat() 接口，屏蔽模型细节
+│   └── schemas.ts                     # 各 Agent 输出 Schema 定义
+├── storage/                           # 存储层
+│   ├── db.ts                          # SQLite 连接初始化，建表
+│   └── repositories/
+│       ├── fileRepo.ts
+│       ├── chunkRepo.ts
+│       ├── taskRepo.ts
+│       ├── workflowRepo.ts
+│       └── resultRepo.ts
+├── utils/
+│   ├── logger.ts                      # 结构化日志
+│   └── time.ts                        # 时间格式化 / duration 计算
+└── constants/
+    └── workflow.ts                    # 节点名称枚举 / 状态枚举
 ```
 
-### 6.2 前端目录结构
+### 8.2 前端
 
 ```
-client/
-├── src/
-│   ├── main.tsx                        # 入口
-│   ├── App.tsx
-│   ├── pages/
-│   │   └── WorkbenchPage.tsx           # 工作台主页面
-│   ├── components/
-│   │   ├── FilePanel/
-│   │   │   ├── FileUploader.tsx
-│   │   │   ├── FileList.tsx
-│   │   │   └── index.tsx
-│   │   ├── TaskInputPanel/
-│   │   │   └── index.tsx
-│   │   ├── WorkflowPanel/
-│   │   │   ├── WorkflowNode.tsx
-│   │   │   ├── NodeDetailDrawer.tsx
-│   │   │   └── index.tsx
-│   │   ├── ResultPanel/
-│   │   │   ├── RelatedFilesCard.tsx
-│   │   │   ├── AnalysisCard.tsx
-│   │   │   ├── SuggestionsCard.tsx
-│   │   │   ├── RisksCard.tsx
-│   │   │   ├── DocDraftCard.tsx
-│   │   │   └── index.tsx
-│   │   └── HistoryPanel/
-│   │       └── index.tsx
-│   ├── stores/                         # Zustand Store
-│   │   ├── useFileStore.ts
-│   │   ├── useTaskStore.ts
-│   │   └── useUIStore.ts
-│   ├── services/                       # API 调用
-│   │   ├── fileApi.ts
-│   │   ├── taskApi.ts
-│   │   └── workflowApi.ts
-│   ├── types/                          # TypeScript 类型定义
-│   │   ├── file.ts
-│   │   ├── task.ts
-│   │   ├── workflow.ts
-│   │   └── result.ts
-│   └── utils/
-└── ...
+client/src/
+├── pages/
+│   └── WorkbenchPage.tsx              # 三栏布局容器
+├── components/
+│   ├── FilePanel/
+│   │   ├── FileUploader.tsx            # 上传按钮 + 进度
+│   │   ├── FileList.tsx               # 文件列表 + 删除
+│   │   └── index.tsx
+│   ├── TaskInputPanel/
+│   │   └── index.tsx                  # 任务输入框 + 执行按钮
+│   ├── WorkflowPanel/
+│   │   ├── WorkflowTimeline.tsx       # 节点时间线展示
+│   │   ├── WorkflowNode.tsx           # 单个节点状态组件
+│   │   ├── NodeDetailDrawer.tsx       # 节点详情抽屉
+│   │   └── index.tsx
+│   ├── ResultPanel/
+│   │   ├── RelatedFilesCard.tsx
+│   │   ├── AnalysisCard.tsx
+│   │   ├── SuggestionsCard.tsx
+│   │   ├── RisksCard.tsx
+│   │   ├── DocDraftCard.tsx           # 支持一键复制
+│   │   └── index.tsx
+│   └── HistoryPanel/
+│       ├── TaskHistoryList.tsx
+│       └── index.tsx
+├── stores/                            # Zustand Store
+│   ├── useFileStore.ts
+│   ├── useTaskStore.ts
+│   └── useUIStore.ts
+├── services/                          # API 调用层
+│   ├── fileApi.ts
+│   ├── taskApi.ts
+│   └── workflowApi.ts
+├── types/                              # 与后端共享的 TS 类型
+│   ├── file.ts
+│   ├── task.ts
+│   ├── workflow.ts
+│   └── result.ts
+└── utils/
+    └── polling.ts                      # 轮询工具函数
 ```
 
 ---
 
-## 7. 关键设计决策记录
+## 9. 数据库设计要点
 
-| 决策项       | 选择           | 原因                                      |
-| ------------ | -------------- | ----------------------------------------- |
-| 数据库       | SQLite         | MVP 轻量、无需额外服务、便于本地开发      |
-| 前端状态管理 | Zustand        | 轻量、适合多区域状态、避免 Redux 过度设计 |
-| RAG 检索     | 关键词打分     | 首版先保证可用，后续可升级向量检索        |
-| 工作流执行器 | 自研           | 便于理解与讲解、可灵活控制状态流转        |
-| Agent 通信   | 上下文对象传递 | 节点间数据清晰、便于落库与追溯            |
-| 前端布局     | 三栏工作台     | 符合工程工具用户习惯、信息密度高          |
+SQLite 数据库文件位于 `server/data/db.sqlite`，MVP 阶段不使用 ORM，直接用 `better-sqlite3` 封装的原始 SQL。
 
----
+### 9.1 表关系
 
-## 8. 扩展点预留
+```
+files ──< chunks          （文件删除时级联删除 chunks）
+tasks ──< workflow_nodes  （任务删除时级联删除节点）
+tasks ──< task_results    （task_id 一对一）
+```
 
-| 模块                  | 预留扩展方向                                 |
-| --------------------- | -------------------------------------------- |
-| LLM Client            | 支持多模型切换（OpenAI / Claude / 本地模型） |
-| RAG Searcher          | 支持 embedding 向量检索、BM25、rerank        |
-| Workflow Orchestrator | 支持分支/条件节点、多轮续跑                  |
-| Storage               | 支持 PostgreSQL、向量数据库                  |
-| Frontend              | 支持任务模板、导出 Markdown/JSON、项目空间   |
+### 9.2 索引策略
+
+- `chunks`: 在 `(file_id)` 上建索引，在 `(content)` 上建 FTS 备选
+- `workflow_nodes`: 在 `(task_id)` 上建索引
+- `tasks`: 在 `(status)` 上建索引（便于后台任务查询 running 状态）
 
 ---
 
-## 9. 总结
+## 10. 扩展点与演进路线
 
-本架构设计围绕「**前端工程提效 Agent Workflow 平台**」场景，通过**五层垂直分层**实现了职责清晰的系统架构：
+| 阶段 | 扩展内容 | 影响范围 |
+|------|---------|---------|
+| MVP | 关键词检索 + 简单切片 | rag/searcher.ts, rag/chunker.ts |
+| V2 | embedding 向量检索 | rag/searcher.ts 替换为向量引擎，models/ 增加 embeddingClient |
+| V2 | 多轮任务续跑 | storage/ 增加 sessions 表，orchestrator.ts 增加上下文拼接 |
+| V2 | 分支节点 / 条件跳过 | nodeRunner.ts 增加条件判断，workflow_nodes 增加 condition 字段 |
+| V2 | 结果导出 | 前端增加 exportService，支持 Markdown / JSON / PR 格式下载 |
 
-1. **前端展示层**：三栏工作台，交互友好
-2. **接口层**：RESTful API，统一响应
-3. **工作流编排层**：自研 Orchestrator，可观测、可追溯
-4. **RAG 与上下文层**：文件解析 → 切片 → 索引 → 检索
-5. **存储层**：SQLite 本地存储，表设计支持完整链路
+---
 
-核心数据流覆盖**文件上传**、**任务执行**、**历史查看**三大场景，完整执行链路展示了从用户输入到结构化输出的全流程，为后续代码开发提供了明确的架构指导。
+## 11. 总结
+
+本架构以「五层分层 + 固定节点顺序 + Repository 模式」为核心约束，确保：
+
+- **开发对齐**：每层职责单一，新增 Agent 或替换模型不影响其他层
+- **调试友好**：节点 input/output 均落库，前端可完整回放执行过程
+- **演进可控**：扩展点均有明确定义，不因短期需求破坏架构边界

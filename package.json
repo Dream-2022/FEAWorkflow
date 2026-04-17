@@ -1,0 +1,9 @@
+{
+  "name": "fea-workflow",
+  "version": "0.0.1",
+  "scripts": {
+    "web:dev": "pnpm --dir ./web dev",
+    "server:dev": "pnpm --dir ./server dev",
+    "dev": "pnpm web:dev & pnpm server:dev"
+  }
+}

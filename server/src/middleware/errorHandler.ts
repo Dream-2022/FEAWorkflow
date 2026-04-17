@@ -36,9 +36,9 @@ export const errorHandler = (
     message = 'Unauthorized';
   }
 
-  res.status(statusCode).json(ResponseUtil.error(message));
+  ResponseUtil.error(res, message, statusCode);
 };
 
 export const notFoundHandler = (req: Request, res: Response) => {
-  res.status(404).json(ResponseUtil.error(`Route ${req.originalUrl} not found`));
+  ResponseUtil.error(res, `Route ${req.originalUrl} not found`, 404);
 };

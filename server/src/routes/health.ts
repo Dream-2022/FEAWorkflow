@@ -15,7 +15,7 @@ router.get('/', (req: Request, res: Response) => {
     uptime,
   };
 
-  res.json(ResponseUtil.success(healthData));
+  res.json(ResponseUtil.success(res, healthData));
 });
 
 export default router;

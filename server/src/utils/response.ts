@@ -1,19 +1,21 @@
 import { ApiResponse } from '../types';
+import { Response } from 'express';
 
 export class ResponseUtil {
-  static success<T>(data?: T, message?: string): ApiResponse<T> {
-    return {
+  static success<T>(res: Response, data?: T, message?: string): void {
+    const response: ApiResponse<T> = {
       success: true,
       data,
       message,
     };
+    res.json(response);
   }
 
-  static error(error: string, data?: any): ApiResponse {
-    return {
+  static error(res: Response, error: string, statusCode = 500): void {
+    const response: ApiResponse = {
       success: false,
       error,
-      data,
     };
+    res.status(statusCode).json(response);
   }
 }

@@ -1,23 +1,33 @@
-import { Header } from '../components/Header';
-import { FilePanel } from '../components/FilePanel';
-import { TaskPanel } from '../components/TaskPanel';
-import { ResultPanel } from '../components/ResultPanel';
+import { Layout } from "antd";
+import { Header } from "../components/Header";
+import { FilePanel } from "../components/FilePanel";
+import { TaskPanel } from "../components/TaskPanel";
+import { ResultPanel } from "../components/ResultPanel";
+
+const { Sider, Content } = Layout;
 
 export function WorkbenchLayout() {
   return (
-    <div className="workbench-layout">
+    <Layout style={{ height: "100vh" }}>
       <Header />
-      <div className="workbench-main">
-        <div className="panel-column left-column">
-          <FilePanel />
-        </div>
-        <div className="panel-column middle-column">
-          <TaskPanel />
-        </div>
-        <div className="panel-column right-column">
+      <Layout>
+        <Sider
+          width={400}
+          theme="light"
+          style={{ overflow: "auto", borderRight: "1px solid #f0f0f0" }}
+        >
+          <div style={{ padding: "16px" }}>
+            <FilePanel />
+            <div style={{ height: "16px" }} />
+            <TaskPanel />
+          </div>
+        </Sider>
+        <Content
+          style={{ overflow: "auto", background: "#f5f5f5", padding: "16px" }}
+        >
           <ResultPanel />
-        </div>
-      </div>
-    </div>
+        </Content>
+      </Layout>
+    </Layout>
   );
 }

@@ -1,49 +1,113 @@
-import { mockTaskResult } from '../../mock';
+import { Card, List, Typography, Collapse, Tag, Button, Space } from "antd";
+import {
+  CopyOutlined,
+  FileTextOutlined,
+  AlertOutlined,
+} from "@ant-design/icons";
+import { mockTaskResult } from "../../mock";
+
+const { Text, Paragraph, Title } = Typography;
+const { Panel } = Collapse;
 
 export function ResultPanel() {
   return (
-    <div className="panel result-panel">
-      <div className="panel-header">
-        <h2>分析结果</h2>
-      </div>
-      <div className="panel-content">
-        <div className="result-card">
-          <h3>涉及文件</h3>
-          <ul>
-            {mockTaskResult.relatedFiles?.map((file, idx) => (
-              <li key={idx}>{file}</li>
-            ))}
-          </ul>
-        </div>
+    <Space orientation="vertical" style={{ width: "100%" }} size="middle">
+      <Card
+        title="涉及文件"
+        extra={
+          <Tag color="blue">
+            {mockTaskResult.relatedFiles?.length || 0} 个文件
+          </Tag>
+        }
+      >
+        <List
+          dataSource={mockTaskResult.relatedFiles}
+          renderItem={(item) => (
+            <List.Item>
+              <FileTextOutlined
+                style={{ marginRight: "8px", color: "#1890ff" }}
+              />
+              <Text code>{item}</Text>
+            </List.Item>
+          )}
+        />
+      </Card>
 
-        <div className="result-card">
-          <h3>当前实现分析</h3>
-          <p>{mockTaskResult.analysis}</p>
-        </div>
+      <Card title="当前实现分析">
+        <Paragraph>{mockTaskResult.analysis}</Paragraph>
+      </Card>
 
-        <div className="result-card">
-          <h3>推荐改动方案</h3>
-          <ul>
-            {mockTaskResult.suggestions?.map((suggestion, idx) => (
-              <li key={idx}>{suggestion}</li>
-            ))}
-          </ul>
-        </div>
+      <Card title="推荐改动方案">
+        <List
+          dataSource={mockTaskResult.suggestions}
+          renderItem={(item) => (
+            <List.Item>
+              <Tag color="success">方案</Tag>
+              <Text>{item}</Text>
+            </List.Item>
+          )}
+        />
+      </Card>
 
-        <div className="result-card">
-          <h3>风险点</h3>
-          <ul>
-            {mockTaskResult.risks?.map((risk, idx) => (
-              <li key={idx}>{risk}</li>
-            ))}
-          </ul>
-        </div>
+      <Card
+        title="风险点"
+        extra={<AlertOutlined style={{ color: "#faad14" }} />}
+      >
+        <List
+          dataSource={mockTaskResult.risks}
+          renderItem={(item) => (
+            <List.Item>
+              <Tag color="warning">风险</Tag>
+              <Text type="secondary">{item}</Text>
+            </List.Item>
+          )}
+        />
+      </Card>
 
-        <div className="result-card">
-          <h3>文档草稿</h3>
-          <pre>{mockTaskResult.docDraft}</pre>
-        </div>
-      </div>
-    </div>
+      <Card
+        title="文档草稿"
+        extra={
+          <Button icon={<CopyOutlined />} size="small">
+            复制
+          </Button>
+        }
+      >
+        <Card type="inner" style={{ background: "#fafafa" }}>
+          <pre style={{ margin: 0, fontSize: "13px", whiteSpace: "pre-wrap" }}>
+            {mockTaskResult.docDraft}
+          </pre>
+        </Card>
+      </Card>
+
+      <Collapse
+        defaultActiveKey={["1"]}
+        items={[
+          {
+            key: "1",
+            label: "下一步建议",
+            children: (
+              <Space orientation="vertical" style={{ width: "100%" }}>
+                {mockTaskResult.nextSteps.map((item, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 12px",
+                      borderRadius: 6,
+                      background: "#fafafa",
+                    }}
+                  >
+                    <Tag color="blue">{index + 1}</Tag>
+                    <Text>{item}</Text>
+                  </div>
+                ))}
+              </Space>
+            ),
+          },
+        ]}
+      />
+    </Space>
   );
 }

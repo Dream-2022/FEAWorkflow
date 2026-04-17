@@ -1,15 +1,26 @@
-import { env } from '../../config/env';
+import { Layout, Badge } from "antd";
+import { env } from "../../config/env";
+
+const { Header: AntHeader } = Layout;
 
 export function Header() {
   return (
-    <header className="header">
-      <div className="header-content">
-        <h1 className="header-title">{env.VITE_APP_NAME}</h1>
-        <div className="header-status">
-          <span className="status-dot"></span>
-          <span>Ready</span>
-        </div>
+    <AntHeader
+      style={{
+        background: "#fff",
+        padding: "0 24px",
+        borderBottom: "1px solid #f0f0f0",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+      }}
+    >
+      <div style={{ fontSize: "20px", fontWeight: 600, color: "#1f2937" }}>
+        {env.VITE_APP_NAME}
       </div>
-    </header>
+      <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+        <Badge status="success" text="就绪" />
+      </div>
+    </AntHeader>
   );
 }
